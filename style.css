@@ -1,0 +1,22 @@
+/* Resets and basic styling */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    background: #111;
+    color: #fff;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+/* Phaser handles the canvas, so just ensuring container centers it */
+#game-container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}

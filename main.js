@@ -1,0 +1,470 @@
+﻿const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    parent: 'game-container',
+    backgroundColor: '#87CEEB',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 1000 },
+            debug: false // Set to true to see hitboxes
+        }
+    },
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    }
+};
+
+const game = new Phaser.Game(config);
+
+// —————————————————————————————————————————————————————————————————————————————
+// CONFIGURATION & CONSTANTS
+// —————————————————————————————————————————————————————————————————————————————
+
+const ASSETS = {
+    punch: { key: 'punch', file: 'assets/Punch.png', frames: 6, rate: 10, loop: false },
+    kick: { key: 'kick', file: 'assets/Kick.png', frames: 6, rate: 10, loop: false },
+    idle: { key: 'idle', file: 'assets/Idle.png', frames: 6, rate: 8, loop: true },
+    jump: { key: 'jump', file: 'assets/Jump.png', frames: 10, rate: 14, loop: false },
+    walk: { key: 'walk', file: 'assets/Walk.png', frames: 8, rate: 10, loop: true },
+    dead: { key: 'dead', file: 'assets/Dead.png', frames: 3, rate: 5, loop: false },
+    hurt: { key: 'hurt', file: 'assets/Hurt.png', frames: 3, rate: 10, loop: false },
+    // Shield updated to 2 frames
+    shield: { key: 'shield', file: 'assets/Shield.png', frames: 2, rate: 10, loop: false }
+};
+
+const STATES = {
+    IDLE: 'idle',
+    WALK: 'walk',
+    JUMP: 'jump',
+    PUNCH: 'punch',
+    KICK: 'kick',
+    DEAD: 'dead',
+    HURT: 'hurt',
+    SHIELD: 'shield'
+};
+
+const STATS = {
+    speedWalk: 180,     // Restoring speed
+    jumpForce: -600,    // Restoring jump
+    accel: 1500,
+    drag: 2000,
+    attackCooldown: 500,
+    damagePunch: 10,
+    damageKick: 15,
+    hitDistance: 80      // Tightened from 120
+};
+
+// —————————————————————————————————————————————————————————————————————————————
+// GLOBAL VARIABLES
+// —————————————————————————————————————————————————————————————————————————————
+
+var player, enemy, ground;
+var cursors, keyPunch, keyKick, keyShield;
+var isGameActive = false;
+
+// UI Elements
+const ui = {
+    playerBar: null,
+    enemyBar: null,
+    playerName: null,
+    enemyName: null,
+    startScreen: null,
+    gameOverScreen: null,
+    gameOverText: null,
+    inputPlayer: null,
+    inputEnemy: null
+};
+
+// —————————————————————————————————————————————————————————————————————————————
+// PHASER FUNCTIONS
+// —————————————————————————————————————————————————————————————————————————————
+
+function preload() {
+    // Load spritesheets from PNG files
+    Object.values(ASSETS).forEach(asset => {
+        this.load.spritesheet(asset.key, asset.file, { frameWidth: 128, frameHeight: 128 });
+    });
+}
+
+function create() {
+    // 1. CREATE ANIMATIONS
+    Object.values(ASSETS).forEach(asset => {
+        this.anims.create({
+            key: asset.key,
+            frames: this.anims.generateFrameNumbers(asset.key, { start: 0, end: asset.frames - 1 }),
+            frameRate: asset.rate,
+            repeat: asset.loop ? -1 : 0
+        });
+    });
+
+    // 2. CREATE WORLD
+    ground = this.add.rectangle(400, 570, 800, 40, 0x333333);
+    this.physics.add.existing(ground, true);
+
+    // 3. CREATE FIGHTERS
+    player = createFighter(this, 200, 450, 'PLAYER');
+    enemy = createFighter(this, 600, 450, 'ENEMY');
+
+    // Collisions
+    this.physics.add.collider(player, ground);
+    this.physics.add.collider(enemy, ground);
+    this.physics.add.collider(player, enemy);
+
+    // 4. INPUTS
+    cursors = this.input.keyboard.createCursorKeys();
+    keyPunch = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    keyKick = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    keyShield = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+
+    // 5. UI BINDING
+    ui.playerBar = document.getElementById('player-health');
+    ui.enemyBar = document.getElementById('enemy-health');
+    ui.playerName = document.getElementById('player-name');
+    ui.enemyName = document.getElementById('enemy-name'); // Ensure this ID exists in HTML
+    ui.startScreen = document.getElementById('start-screen');
+    ui.gameOverScreen = document.getElementById('game-over-screen');
+    ui.gameOverText = document.getElementById('game-over-text');
+    ui.inputPlayer = document.getElementById('input-player-name');
+    ui.inputEnemy = document.getElementById('input-enemy-name');
+
+    // Global hooks
+    window.startGame = () => {
+        // Update Names
+        ui.playerName.textContent = ui.inputPlayer.value || "PLAYER";
+        ui.enemyName.textContent = ui.inputEnemy.value || "ENEMY";
+
+        resetGame(this);
+        isGameActive = true;
+        ui.startScreen.classList.add('hidden');
+    };
+
+    window.restartGame = () => {
+        // Return to Start Screen with previous names pre-filled
+        isGameActive = false;
+        ui.gameOverScreen.classList.add('hidden');
+        ui.startScreen.classList.remove('hidden');
+    };
+
+    // Initial State
+    isGameActive = false;
+    ui.startScreen.classList.remove('hidden');
+    ui.gameOverScreen.classList.add('hidden');
+}
+
+function update(time, delta) {
+    if (!isGameActive) return;
+
+    // AI Logic
+    handleEnemyAI(time);
+
+    // Player Input
+    handlePlayerInput(time);
+
+    // Check bounds
+    if (player.y > 600) player.takeDamage(999);
+    if (enemy.y > 600) enemy.takeDamage(999);
+}
+
+
+// —————————————————————————————————————————————————————————————————————————————
+// GAME LOGIC HELPERS
+// —————————————————————————————————————————————————————————————————————————————
+
+function createFighter(scene, x, y, type) {
+    const sprite = scene.physics.add.sprite(x, y, 'idle');
+    sprite.setCollideWorldBounds(true);
+
+    // Physics Body adjustments
+    sprite.body.setSize(40, 90);
+    sprite.body.setOffset(44, 38);
+    sprite.body.setDragX(STATS.drag);
+    // Strict cap on horizontal speed to ensure "Walking" only
+    sprite.body.setMaxVelocity(STATS.speedWalk, 1000);
+
+    // PROPERTIES
+    sprite.type = type;
+    sprite.hp = 100;
+    sprite.maxHp = 100;
+    sprite.isDead = false;
+    sprite.currentState = STATES.IDLE;
+    sprite.lastAttackTime = 0;
+
+    // METHODS
+    sprite.setState = function (newState, force = false) {
+        if (this.isDead) return;
+        if (this.currentState === newState && !force) return;
+
+        this.currentState = newState;
+
+        // Play animation
+        const isAttack = (newState === STATES.PUNCH || newState === STATES.KICK || newState === STATES.HURT || newState === STATES.DEAD);
+
+        // Handle Shield (Animation is now available)
+        if (newState === STATES.SHIELD) {
+            this.play(STATES.SHIELD, true);
+        } else {
+            this.play(newState, true);
+        }
+
+        if (isAttack) {
+            this.once('animationcomplete', () => {
+                if (this.anims.currentAnim && this.anims.currentAnim.key === newState) {
+                    if (this.currentState === STATES.DEAD) return;
+                    this.setState(STATES.IDLE);
+                }
+            });
+        }
+    };
+
+    sprite.takeDamage = function (amount) {
+        if (this.isDead) return;
+
+        if (this.currentState === STATES.SHIELD) {
+            // Blocked! Greatly Reduced damage
+            amount = Math.ceil(amount * 0.1);
+        }
+
+        this.hp -= amount;
+        if (this.hp <= 0) {
+            this.hp = 0;
+            this.die();
+        } else {
+            // Only play hurt if not blocking? 
+            // Usually block absorbs hit reaction too, but let's keep it simple
+            if (this.currentState !== STATES.SHIELD) {
+                this.setVelocityX(0);
+                this.setState(STATES.HURT, true);
+            }
+        }
+        updateUI();
+    };
+
+    sprite.die = function () {
+        this.isDead = true;
+        this.setVelocity(0, 0);
+        this.setAccelerationX(0);
+        this.body.allowGravity = false;
+        this.body.checkCollision.none = true;
+        this.body.moves = false;
+
+        this.play(STATES.DEAD, true);
+
+        // Visual adjustment: Removed offset as -5 was floating and +5 was sinking.
+        // 0 should be the correct baseline.
+
+        setTimeout(() => {
+            endGame(this.type === 'PLAYER' ? 'YOU LOST' : 'YOU WON');
+        }, 2000);
+    };
+
+    sprite.play('idle');
+    return sprite;
+}
+
+function handlePlayerInput(time) {
+    if (player.isDead || player.currentState === STATES.HURT) return;
+
+    const onGround = player.body.blocked.down || player.body.touching.down;
+
+    // ATTACKS
+    const canAttack = time > player.lastAttackTime + STATS.attackCooldown;
+
+    // SHIELD INPUT
+    // Allow shielding if on ground and not attacking
+    if (keyShield.isDown && onGround) {
+        // Can hold shield
+        if (player.currentState !== STATES.PUNCH && player.currentState !== STATES.KICK) {
+            player.setVelocityX(0);
+            player.setAccelerationX(0);
+            player.setState(STATES.SHIELD);
+            return; // Block movement
+        }
+    } else {
+        // If release shield
+        if (player.currentState === STATES.SHIELD) {
+            player.setState(STATES.IDLE);
+        }
+    }
+
+    if (canAttack) {
+        if (Phaser.Input.Keyboard.JustDown(keyPunch)) {
+            performAttack(player, enemy, STATES.PUNCH, STATS.damagePunch, time);
+            return;
+        }
+        if (Phaser.Input.Keyboard.JustDown(keyKick)) {
+            performAttack(player, enemy, STATES.KICK, STATS.damageKick, time);
+            return;
+        }
+    }
+
+    // Lock movement during attack or shield
+    if (player.currentState === STATES.PUNCH || player.currentState === STATES.KICK || player.currentState === STATES.SHIELD) {
+        return;
+    }
+
+    // MOVEMENT
+    if (cursors.left.isDown) {
+        player.flipX = true;
+        if (onGround) {
+            player.setAccelerationX(-STATS.accel);
+            player.setState(STATES.WALK);
+        } else {
+            // Reduced air control
+            player.setAccelerationX(-STATS.accel * 0.05);
+        }
+    }
+    else if (cursors.right.isDown) {
+        player.flipX = false;
+        if (onGround) {
+            player.setAccelerationX(STATS.accel);
+            player.setState(STATES.WALK);
+        } else {
+            // Reduced air control
+            player.setAccelerationX(STATS.accel * 0.05);
+        }
+    }
+    else {
+        player.setAccelerationX(0);
+        if (onGround) {
+            if (Math.abs(player.body.velocity.x) < 20) player.setState(STATES.IDLE);
+        }
+    }
+
+    // JUMP
+    if (cursors.up.isDown && onGround) {
+        player.setVelocityY(STATS.jumpForce);
+        player.setState(STATES.JUMP);
+    }
+
+    // Air Animation
+    if (!onGround) {
+        // If falling/jumping and not attacking
+        if (player.currentState !== STATES.JUMP && player.currentState !== STATES.PUNCH && player.currentState !== STATES.KICK) {
+            player.play(STATES.JUMP, true);
+        }
+    }
+}
+
+function handleEnemyAI(time) {
+    if (enemy.isDead || enemy.currentState === STATES.HURT) return;
+
+    const dist = Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y);
+    const attackRange = 100;
+
+    // Face Player
+    if (player.x < enemy.x) enemy.flipX = true;
+    else enemy.flipX = false;
+
+    // ATTACK
+    if (dist < attackRange) {
+        enemy.setAccelerationX(0);
+        enemy.setVelocityX(0);
+
+        if (time > enemy.lastAttackTime + 2000) { // Slower attack rate
+            const type = Math.random() > 0.5 ? STATES.PUNCH : STATES.KICK;
+            const dmg = type === STATES.PUNCH ? STATS.damagePunch : STATS.damageKick;
+            performAttack(enemy, player, type, dmg, time);
+        } else {
+            // Block if player is attacking? Or just random block
+            if (enemy.currentState !== STATES.PUNCH &&
+                enemy.currentState !== STATES.KICK &&
+                enemy.currentState !== STATES.HURT) {
+
+                // AI Shield logic
+                if (Math.random() > 0.98) { // 2% chance per frame to block
+                    enemy.setState(STATES.SHIELD);
+                } else if (enemy.currentState === STATES.SHIELD && Math.random() > 0.95) {
+                    // 5% chance to drop shield
+                    enemy.setState(STATES.IDLE);
+                } else if (enemy.currentState !== STATES.SHIELD) {
+                    enemy.setState(STATES.IDLE);
+                }
+            }
+        }
+    }
+    // MOVE
+    else {
+        // Drop shield if moving
+        if (enemy.currentState === STATES.SHIELD) enemy.setState(STATES.IDLE);
+
+        // Simple chase
+        const dir = player.x < enemy.x ? -1 : 1;
+        enemy.setAccelerationX(dir * STATS.accel);
+
+        enemy.setState(STATES.WALK); // Always Walk, never Run
+    }
+}
+
+function performAttack(attacker, target, state, damage, time) {
+    attacker.setVelocityX(0);
+    attacker.setAccelerationX(0);
+    attacker.setState(state, true);
+    attacker.lastAttackTime = time;
+
+    // hitbox check delayed to match animation frame
+    attacker.scene.time.delayedCall(200, () => {
+        if (attacker.isDead || target.isDead) return;
+
+        // Simple distance check for hit
+        const dist = Phaser.Math.Distance.Between(attacker.x, attacker.y, target.x, target.y);
+
+        const facing = (attacker.x < target.x && !attacker.flipX) || (attacker.x > target.x && attacker.flipX);
+        const isFacing = facing;
+
+        const yDist = Math.abs(attacker.y - target.y);
+
+        // LOGIC: Hit if close and facing, OR if extremely close (overlapping) ignore facing
+        const isCloseEnough = dist < STATS.hitDistance;
+        const isVeryClose = dist < 50;
+        const isAlignedY = yDist < 100;
+
+        if (isAlignedY && ((isCloseEnough && isFacing) || isVeryClose)) {
+            // Hit!
+            target.takeDamage(damage);
+            // Pushback
+            const pushDir = attacker.x < target.x ? 1 : -1;
+            target.setVelocityX(pushDir * 150);
+            target.setVelocityY(-100);
+        }
+    });
+}
+
+function updateUI() {
+    const pPct = Math.max(0, (player.hp / player.maxHp) * 100);
+    const ePct = Math.max(0, (enemy.hp / enemy.maxHp) * 100);
+
+    ui.playerBar.style.width = pPct + '%';
+    ui.enemyBar.style.width = ePct + '%';
+
+    ui.playerBar.style.backgroundColor = pPct < 30 ? '#ff0000' : '#00ff00';
+    ui.enemyBar.style.backgroundColor = ePct < 30 ? '#ff0000' : '#ff0000';
+}
+
+function resetGame(scene) {
+    [player, enemy].forEach(fighter => {
+        fighter.body.allowGravity = true;
+        fighter.body.moves = true;
+        fighter.body.checkCollision.none = false;
+        fighter.setVelocity(0, 0);
+        fighter.setAccelerationX(0);
+        fighter.hp = fighter.maxHp;
+        fighter.isDead = false;
+        fighter.setState(STATES.IDLE, true);
+        fighter.clearTint();
+    });
+
+    player.setPosition(200, 450);
+    enemy.setPosition(600, 450);
+
+    updateUI();
+}
+
+function endGame(message) {
+    isGameActive = false;
+    ui.gameOverText.innerText = message;
+    ui.gameOverScreen.classList.remove('hidden');
+}
