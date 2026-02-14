@@ -206,6 +206,37 @@ let lastTime = 0, slowMoTimer = 0, gamePaused = false;
 
 const keys = {};
 const particles = [];
+const trails = [];
+
+// ============================================================
+// CAMERA & FEEL
+// ============================================================
+const camera = {
+    x: 0, y: 0, zoom: 1, baseZoom: 1,
+    shake: 0,
+    update(dt, targetX, targetY) {
+        // Follow target
+        this.x += (targetX - this.x) * 0.1;
+        this.y += (targetY - this.y) * 0.1;
+
+        // Zoom
+        this.zoom += (this.baseZoom - this.zoom) * 0.05;
+
+        // Shake dampening
+        if (this.shake > 0) this.shake -= dt * 0.5;
+        if (this.shake < 0) this.shake = 0;
+    },
+    getOffset() {
+        const s = this.shake;
+        return {
+            x: -this.x * this.zoom + canvas.width / 2 + (Math.random() * s - s / 2),
+            y: -this.y * this.zoom + canvas.height / 2 + (Math.random() * s - s / 2)
+        };
+    }
+};
+
+let hitStop = 0; // Freeze frames
+
 
 // ============================================================
 // FIGHTER
@@ -298,9 +329,9 @@ class Fighter {
         if (this.state === 'BLOCK' && this.stamina > 10) {
             blocked = true;
             finalDmg *= (1 - CONFIG.BLOCK_REDUCTION);
-            spawnSpark(this.x + this.w / 2, this.y + 40, '#0af');
+            spawnSpark(this.x + this.w / 2, this.y + 40, '#0af', 10, true); // Block Shock!
         } else {
-            spawnSpark(this.x + this.w / 2, this.y + 40, '#f00', 12);
+            spawnSpark(this.x + this.w / 2, this.y + 40, '#f00', 15, true); // Hit Shock!
         }
 
         this.health -= finalDmg;
@@ -475,46 +506,115 @@ function checkHit(atk, vic, dmg) {
 }
 
 // Spark VFX
-function spawnSpark(x, y, c, n = 8) {
+function spawnSpark(x, y, c, n = 8, isShock = false) {
     for (let i = 0; i < n; i++) {
         const a = Math.random() * 6.28;
         const s = Math.random() * 5 + 2;
-        particles.push({ x, y, dx: Math.cos(a) * s, dy: Math.sin(a) * s, l: 1, c });
+        particles.push({ x, y, dx: Math.cos(a) * s, dy: Math.sin(a) * s, l: 1, c, type: 'spark' });
+    }
+    if (isShock) {
+        particles.push({ x, y, r: 10, l: 1, type: 'shock', c: '#fff', w: 5 });
+        camera.shake = 20; // Screen Shake!
+        hitStop = 80;      // Freeze!
     }
 }
 
 function loop(ts) {
     if (!lastTime) lastTime = ts;
-    const dt = Math.min(ts - lastTime, 50);
+    let dt = Math.min(ts - lastTime, 50);
     lastTime = ts;
 
     if (!gamePaused) {
-        if (slowMoTimer > 0) slowMoTimer -= dt;
+
+        // Hit Stop Logic (Freeze update, keep draw)
+        if (hitStop > 0) {
+            hitStop -= dt;
+            dt = 0; // Pause physics/anim
+        } else {
+            if (slowMoTimer > 0) slowMoTimer -= dt;
+        }
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // BG
-        const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-        g.addColorStop(0, '#444'); g.addColorStop(1, '#111');
-        ctx.fillStyle = g; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#000'; ctx.fillRect(0, CONFIG.GROUND_Y, canvas.width, canvas.height);
 
-        if (gameState === 'FIGHT') {
+        // Camera Target (Midpoint)
+        const midX = (p1.x + p2.x) / 2 + 20; // + offset
+        const midY = (p1.y + p2.y) / 2;
+        const dist = Math.abs(p1.x - p2.x);
+        camera.baseZoom = dist > 600 ? 0.7 : (dist < 150 ? 1.3 : 1.0); // Dynamic Zoom
+        camera.update(dt || 16, midX, midY); // Always update camera shake
+
+        const cam = camera.getOffset();
+
+        ctx.save();
+        ctx.translate(cam.x, cam.y);
+        ctx.scale(camera.zoom, camera.zoom);
+
+        // BG
+        const g = ctx.createLinearGradient(0, -500, 0, canvas.height + 200);
+        g.addColorStop(0, '#222'); g.addColorStop(1, '#111');
+        ctx.fillStyle = g; ctx.fillRect(-1000, -1000, 4000, 4000); // Oversized BG
+
+        // Floor with parallax feel
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(-1000, CONFIG.GROUND_Y, 4000, 500);
+
+        if (gameState === 'FIGHT' && dt > 0) {
             handleInput(); handleAI(); checkHits();
         }
 
+        // Update Entities
         p1.update(dt); p2.update(dt);
+
+        // Trails
+        if (Math.abs(p1.vx) > 2 && dt > 0 && Math.random() > 0.5) trails.push({ p: { ...p1.animator.pose }, x: p1.x, y: p1.y, color: p1.color, l: 0.5, dir: p1.facingRight });
+        if (Math.abs(p2.vx) > 2 && dt > 0 && Math.random() > 0.5) trails.push({ p: { ...p2.animator.pose }, x: p2.x, y: p2.y, color: p2.color, l: 0.5, dir: p2.facingRight });
+
+        trails.forEach((t, i) => {
+            t.l -= 0.05;
+            if (t.l <= 0) trails.splice(i, 1);
+            else {
+                // Draw Trail (Simplified rendering)
+                ctx.save(); ctx.globalAlpha = t.l * 0.3;
+                // We need a way to draw pose at position. 
+                // Reusing Fighter.draw logic is hard without instance. 
+                // For now, simple ghost rect or we must refactor draw to be static.
+                // Let's just draw shadow blob for now to save complexity
+                ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x + 20, t.y + 50, 20, 0, 6.28); ctx.fill();
+                ctx.restore();
+            }
+        });
+
         p1.draw(); p2.draw();
 
         // Particles
         particles.forEach((p, i) => {
-            p.x += p.dx; p.y += p.dy; p.l -= 0.05;
-            ctx.globalAlpha = p.l; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 6.28); ctx.fill();
+            if (dt > 0) {
+                if (p.type === 'shock') {
+                    p.r += 5; p.l -= 0.1; p.w *= 0.9;
+                } else {
+                    p.x += p.dx; p.y += p.dy; p.l -= 0.05;
+                }
+            }
+
+            ctx.save();
+            ctx.globalAlpha = p.l;
+
+            if (p.type === 'shock') {
+                ctx.strokeStyle = p.c; ctx.lineWidth = p.w;
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.28); ctx.stroke();
+            } else {
+                ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 6.28); ctx.fill();
+            }
+            ctx.restore();
+
             if (p.l <= 0) particles.splice(i, 1);
         });
-        ctx.globalAlpha = 1;
+
+        ctx.restore(); // Camera Pop
     }
     requestAnimationFrame(loop);
 }
+
 
 // UI Helpers (Start/End Round)
 function updateUI() {
@@ -536,32 +636,29 @@ function endRound(winner) {
     if (winner === p1) p1Wins++; else p2Wins++;
     setTimeout(() => {
         if (p1Wins >= 2 || p2Wins >= 2) {
-            if (p1Wins >= 2 || p2Wins >= 2) {
-                const gameOverScreen = document.getElementById('game-over-screen');
-                const gameOverText = document.getElementById('game-over-text');
-                if (gameOverScreen && gameOverText) {
-                    gameOverText.innerText = (winner === p1 ? "YOU WIN" : "YOU LOSE");
-                    gameOverScreen.classList.remove('hidden');
-                } else {
-                    // Fallback to old overlay if exists
-                    const ov = document.getElementById('overlay-container');
-                    const tx = document.getElementById('overlay-text');
-                    if (ov && tx) {
-                        tx.innerText = (winner === p1 ? "YOU WIN" : "LOSE");
-                        ov.classList.add('show');
-                        document.getElementById('restart-btn')?.classList.remove('hidden');
-                    }
+            const gameOverScreen = document.getElementById('game-over-screen');
+            const gameOverText = document.getElementById('game-over-text');
+            if (gameOverScreen && gameOverText) {
+                gameOverText.innerText = (winner === p1 ? "YOU WIN" : "YOU LOSE");
+                gameOverScreen.classList.remove('hidden');
+            } else {
+                const ov = document.getElementById('overlay-container');
+                const tx = document.getElementById('overlay-text');
+                if (ov && tx) {
+                    tx.innerText = (winner === p1 ? "YOU WIN" : "LOSE");
+                    ov.classList.add('show');
+                    document.getElementById('restart-btn')?.classList.remove('hidden');
                 }
-            } else {
-            } else {
-                currentRound++; startRound();
             }
-        }, 1500);
+        } else {
+            currentRound++; startRound();
+        }
+    }, 1500);
 }
+
 function startRound() {
     gameState = 'START'; p1.reset(); p2.reset(); updateUI();
-    gameState = 'START'; p1.reset(); p2.reset(); updateUI();
-    // Use generic overlay if exists, otherwise just console or title
+
     const overlay = document.getElementById('overlay-container');
     const overlayText = document.getElementById('overlay-text');
 
@@ -569,8 +666,8 @@ function startRound() {
         overlayText.innerText = `ROUND ${currentRound}`;
         overlay.classList.add('show');
     }
+
     setTimeout(() => {
-        // Safe check for overlay
         const overlay = document.getElementById('overlay-container');
         if (overlay) {
             document.getElementById('overlay-text').innerText = "FIGHT!";

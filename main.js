@@ -63,7 +63,9 @@ const STATS = {
 // —————————————————————————————————————————————————————————————————————————————
 
 var player, enemy, ground;
-var cursors, keyPunch, keyKick, keyShield;
+var cursors;
+var keyJump, keyPunch, keyKick;
+var keyA, keyD, keyS;
 var isGameActive = false;
 
 // UI Elements
@@ -112,13 +114,21 @@ function create() {
     // Collisions
     this.physics.add.collider(player, ground);
     this.physics.add.collider(enemy, ground);
-    this.physics.add.collider(player, enemy);
+    // this.physics.add.collider(player, enemy); // Allow pass-through
 
     // 4. INPUTS
+    // 4. INPUTS
     cursors = this.input.keyboard.createCursorKeys();
-    keyPunch = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    // Action Keys
+    keyJump = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    keyPunch = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     keyKick = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K);
-    keyShield = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+
+    // Extra Keys for WASD
+    keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
     // 5. UI BINDING
     ui.playerBar = document.getElementById('player-health');
@@ -273,10 +283,14 @@ function handlePlayerInput(time) {
     // ATTACKS
     const canAttack = time > player.lastAttackTime + STATS.attackCooldown;
 
+    // INPUT CHECKERS
+    const isLeft = cursors.left.isDown || keyA.isDown;
+    const isRight = cursors.right.isDown || keyD.isDown;
+    const isBlock = cursors.down.isDown || keyS.isDown;
+    const isJump = Phaser.Input.Keyboard.JustDown(keyJump); // Spacebar
+
     // SHIELD INPUT
-    // Allow shielding if on ground and not attacking
-    if (keyShield.isDown && onGround) {
-        // Can hold shield
+    if (isBlock && onGround) {
         if (player.currentState !== STATES.PUNCH && player.currentState !== STATES.KICK) {
             player.setVelocityX(0);
             player.setAccelerationX(0);
@@ -284,18 +298,17 @@ function handlePlayerInput(time) {
             return; // Block movement
         }
     } else {
-        // If release shield
         if (player.currentState === STATES.SHIELD) {
             player.setState(STATES.IDLE);
         }
     }
 
     if (canAttack) {
-        if (Phaser.Input.Keyboard.JustDown(keyPunch)) {
+        if (Phaser.Input.Keyboard.JustDown(keyPunch)) { // J
             performAttack(player, enemy, STATES.PUNCH, STATS.damagePunch, time);
             return;
         }
-        if (Phaser.Input.Keyboard.JustDown(keyKick)) {
+        if (Phaser.Input.Keyboard.JustDown(keyKick)) { // K
             performAttack(player, enemy, STATES.KICK, STATS.damageKick, time);
             return;
         }
@@ -307,23 +320,21 @@ function handlePlayerInput(time) {
     }
 
     // MOVEMENT
-    if (cursors.left.isDown) {
+    if (isLeft) {
         player.flipX = true;
         if (onGround) {
             player.setAccelerationX(-STATS.accel);
             player.setState(STATES.WALK);
         } else {
-            // Reduced air control
             player.setAccelerationX(-STATS.accel * 0.05);
         }
     }
-    else if (cursors.right.isDown) {
+    else if (isRight) {
         player.flipX = false;
         if (onGround) {
             player.setAccelerationX(STATS.accel);
             player.setState(STATES.WALK);
         } else {
-            // Reduced air control
             player.setAccelerationX(STATS.accel * 0.05);
         }
     }
@@ -335,16 +346,15 @@ function handlePlayerInput(time) {
     }
 
     // JUMP
-    if (cursors.up.isDown && onGround) {
+    if (isJump && onGround) {
         player.setVelocityY(STATS.jumpForce);
         player.setState(STATES.JUMP);
     }
 
     // Air Animation
     if (!onGround) {
-        // If falling/jumping and not attacking
         if (player.currentState !== STATES.JUMP && player.currentState !== STATES.PUNCH && player.currentState !== STATES.KICK) {
-            player.play(STATES.JUMP, true);
+            player.setState(STATES.JUMP);
         }
     }
 }
