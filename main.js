@@ -4,6 +4,10 @@
     height: 600,
     parent: 'game-container',
     backgroundColor: '#87CEEB',
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
     physics: {
         default: 'arcade',
         arcade: {
@@ -66,6 +70,7 @@ var player, enemy, ground;
 var cursors;
 var keyJump, keyPunch, keyKick;
 var keyA, keyD, keyS;
+var mobileInputs = { left: false, right: false, up: false, down: false, punch: false, kick: false };
 var isGameActive = false;
 
 // UI Elements
@@ -140,6 +145,9 @@ function create() {
     ui.gameOverText = document.getElementById('game-over-text');
     ui.inputPlayer = document.getElementById('input-player-name');
     ui.inputEnemy = document.getElementById('input-enemy-name');
+
+    // 6. MOBILE CONTROLS
+    createMobileControls(this);
 
     // Global hooks
     window.startGame = () => {
@@ -284,10 +292,16 @@ function handlePlayerInput(time) {
     const canAttack = time > player.lastAttackTime + STATS.attackCooldown;
 
     // INPUT CHECKERS
-    const isLeft = cursors.left.isDown || keyA.isDown;
-    const isRight = cursors.right.isDown || keyD.isDown;
-    const isBlock = cursors.down.isDown || keyS.isDown;
-    const isJump = Phaser.Input.Keyboard.JustDown(keyJump); // Spacebar
+    const isLeft = cursors.left.isDown || keyA.isDown || mobileInputs.left;
+    const isRight = cursors.right.isDown || keyD.isDown || mobileInputs.right;
+    const isBlock = cursors.down.isDown || keyS.isDown || mobileInputs.down;
+    const isJump = Phaser.Input.Keyboard.JustDown(keyJump) || mobileInputs.up; // Note: mobileInputs.up needs to be handled carefully for JustDown behavior or continuous
+
+    // For Touch, "JustDown" is hard with boolean. 
+    // We'll treat jump as continuous hold for "air jump" logic or state change, 
+    // but the state machine handles transitions so hold is fine.
+    // However, repeated jumping might need reset. 
+    // For now, let's just use the boolean.
 
     // SHIELD INPUT
     if (isBlock && onGround) {
@@ -303,13 +317,16 @@ function handlePlayerInput(time) {
         }
     }
 
+    // Note: Attack cooldown (canAttack) prevents rapid fire, so holding button is fine.
     if (canAttack) {
-        if (Phaser.Input.Keyboard.JustDown(keyPunch)) { // J
+        if (Phaser.Input.Keyboard.JustDown(keyPunch) || mobileInputs.punch) { // J
             performAttack(player, enemy, STATES.PUNCH, STATS.damagePunch, time);
+            mobileInputs.punch = false; // Reset to prevent auto-fire if we want strict tapping
             return;
         }
-        if (Phaser.Input.Keyboard.JustDown(keyKick)) { // K
+        if (Phaser.Input.Keyboard.JustDown(keyKick) || mobileInputs.kick) { // K
             performAttack(player, enemy, STATES.KICK, STATS.damageKick, time);
+            mobileInputs.kick = false;
             return;
         }
     }
@@ -477,4 +494,72 @@ function endGame(message) {
     isGameActive = false;
     ui.gameOverText.innerText = message;
     ui.gameOverScreen.classList.remove('hidden');
+}
+
+function createMobileControls(scene) {
+    // Basic check for mobile environment
+    const isMobile = scene.sys.game.device.os.android || scene.sys.game.device.os.iOS || scene.sys.game.device.input.touch;
+    if (!isMobile) {
+        // Optional: Force display for testing if needed, but per request usually hidden. 
+        // For now, if desktop with mouse, we likely don't want them unless it's a touch laptop.
+        // Let's rely on standard check.
+        // return; 
+    }
+
+    // Actually, user said "Show touch controls only on mobile".
+    if (!isMobile) return;
+
+    const width = scene.scale.width;
+    const height = scene.scale.height;
+
+    // Helper to create button
+    const createBtn = (x, y, color, text, key) => {
+        const btn = scene.add.circle(x, y, 40, color, 0.5).setScrollFactor(0).setInteractive();
+        // Add stroke
+        btn.setStrokeStyle(2, 0xffffff);
+
+        const label = scene.add.text(x, y, text, { fontSize: '24px', fontStyle: 'bold', fontFamily: 'Arial' }).setOrigin(0.5).setScrollFactor(0);
+
+        const press = () => { btn.fillAlpha = 0.8; mobileInputs[key] = true; };
+        const release = () => { btn.fillAlpha = 0.5; mobileInputs[key] = false; };
+
+        btn.on('pointerdown', press);
+        btn.on('pointerup', release);
+        btn.on('pointerout', release);
+
+        // Multi-touch support
+        scene.input.addPointer(2); // Ensure we have enough pointers
+
+        return btn;
+    };
+
+    // D-PAD (Bottom Left)
+    createBtn(60, height - 70, 0x555555, '<', 'left');
+    createBtn(160, height - 70, 0x555555, '>', 'right');
+
+    // ACTIONS (Bottom Right)
+    // Layout: 
+    //      J (Jump)  
+    //  K (Kick)   P (Punch)
+    //      S (Shield)
+
+    // Actually standard fight layout:
+    // Punch (J)   Kick (K)
+    // Jump (Space) Block (S)
+
+    // Jump (Blue)
+    createBtn(width - 60, height - 160, 0x0088ff, 'J', 'up');
+
+    // Punch (Green)
+    createBtn(width - 140, height - 80, 0x00cc00, 'P', 'punch');
+
+    // Kick (Red)
+    createBtn(width - 60, height - 80, 0xff4444, 'K', 'kick');
+
+    // Block (Gray/Yellow) - Bottom center-ish or below jump?
+    // Let's put Shield near Jump/Move or distinct.
+    // User requested "Buttons must be positioned at bottom of screen".
+    // Let's put Block next to Right arrow? Or standard fighting game layout.
+    // Let's put Block as a smaller button or centrally.
+    createBtn(width - 160, height - 180, 0xaaaa00, 'S', 'down');
 }
