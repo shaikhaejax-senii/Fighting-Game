@@ -3,7 +3,7 @@
     width: 800,
     height: 600,
     parent: 'game-container',
-    backgroundColor: '#87CEEB',
+    backgroundColor: '#000000',
     scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH
@@ -162,6 +162,9 @@ function preload() {
             this.load.image(`${key}_${i}`, `${asset.path}${frameNum}.png`);
         }
     });
+
+    // Load Background
+    this.load.image('bg_scene', 'assets/Background/Scene1.png');
 }
 
 function create() {
@@ -201,10 +204,23 @@ function create() {
     });
 
     // 2. CREATE WORLD
-    ground = this.add.rectangle(400, 570, 800, 40, 0x333333);
-    this.physics.add.existing(ground, true);
+    // Background — 955x2000 image with 3 scenes stacked (each ~667px tall)
+    const bg = this.add.image(0, 0, 'bg_scene');
+    bg.setOrigin(0, 0);
+    const sceneHeight = Math.floor(bg.height / 3);   // ~667px per scene
+    const bgScale = 800 / bg.width;                   // scale to fill 800px width
+    bg.setScale(bgScale);
+    bg.setDepth(-10);
 
-    // 3. CREATE FIGHTERS & PROJECTILES
+    // Pick a random scene (0, 1, or 2) and offset Y so that scene fills the viewport
+    const sceneIndex = Math.floor(Math.random() * 3);
+    const yOffset = -(sceneIndex * sceneHeight * bgScale) + 80;  // +80 shifts down so sprites stand on ground
+    bg.setY(yOffset);
+
+    // Invisible ground (physics only — background already has ground art)
+    ground = this.add.rectangle(400, 570, 800, 40);
+    ground.setAlpha(0);
+    this.physics.add.existing(ground, true);
     projectiles = this.physics.add.group({ allowGravity: false });
 
     // Assign Characters dynamically based on UI selections
