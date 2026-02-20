@@ -868,21 +868,28 @@ function createMobileControls(scene) {
 
     const width = scene.scale.width;
     const height = scene.scale.height;
+    const unit = Math.min(width, height);  // Proportional sizing base
 
     // Enable multi-touch for Running + Jumping + Attacking simultaneously
     scene.input.addPointer(4);
 
     // ==========================================
-    // 1. VIRTUAL JOYSTICK (LEFT SIDE)
+    // SAFE MARGINS (8% from edges)
     // ==========================================
-    const joyX = 120;
-    const joyY = height - 120;
-    const joyBaseRadius = 70;
-    const joyThumbRadius = 35;
+    const safeMarginX = width * 0.08;
+    const safeMarginY = height * 0.08;
+
+    // ==========================================
+    // 1. VIRTUAL JOYSTICK (LEFT SIDE — anchored bottom-left)
+    // ==========================================
+    const joyX = safeMarginX + unit * 0.09;
+    const joyY = height - safeMarginY - unit * 0.09;
+    const joyBaseRadius = unit * 0.09;
+    const joyThumbRadius = unit * 0.045;
 
     // Visuals
     const joyBase = scene.add.circle(joyX, joyY, joyBaseRadius, 0x888888, 0.2).setScrollFactor(0).setDepth(100);
-    joyBase.setStrokeStyle(4, 0xffffff, 0.2);
+    joyBase.setStrokeStyle(Math.max(2, unit * 0.005), 0xffffff, 0.2);
 
     const joyThumb = scene.add.circle(joyX, joyY, joyThumbRadius, 0xcccccc, 0.6).setScrollFactor(0).setDepth(101);
     joyThumb.setStrokeStyle(2, 0xffffff, 0.5);
@@ -919,7 +926,6 @@ function createMobileControls(scene) {
     joyZone.on('pointerout', resetJoystick);
 
     function updateJoystick(pointer) {
-        // Calculate raw vector distance
         const dx = pointer.x - joyX;
         const dy = pointer.y - joyY;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -927,7 +933,6 @@ function createMobileControls(scene) {
         let tx = pointer.x;
         let ty = pointer.y;
 
-        // Clamp UI thumb inside the base circle
         if (dist > joyBaseRadius) {
             const angle = Math.atan2(dy, dx);
             tx = joyX + Math.cos(angle) * joyBaseRadius;
@@ -936,8 +941,7 @@ function createMobileControls(scene) {
 
         joyThumb.setPosition(tx, ty);
 
-        // Activation threshold (must drag at least 20px left/right to move)
-        const threshold = 20;
+        const threshold = unit * 0.025;
         const localDx = tx - joyX;
 
         if (localDx < -threshold) {
@@ -947,20 +951,29 @@ function createMobileControls(scene) {
             mobileInputs.right = true;
             mobileInputs.left = false;
         } else {
-            // Deadzone
             mobileInputs.left = false;
             mobileInputs.right = false;
         }
     }
 
     // ==========================================
-    // 2. ACTION BUTTONS (RIGHT SIDE)
+    // 2. ACTION BUTTONS (RIGHT SIDE — anchored bottom-right)
     // ==========================================
+    const btnRadiusLg = unit * 0.06;     // Main attack
+    const btnRadiusMd = unit * 0.045;    // Jump/Kick/Shield
+    const btnRadiusSm = unit * 0.035;    // Powers
+    const btnSpacing = unit * 0.12;
+
     const createActionButton = (vX, vY, radius, color, icon, inputKey) => {
         const btn = scene.add.circle(vX, vY, radius, color, 0.3).setScrollFactor(0).setDepth(100).setInteractive();
-        btn.setStrokeStyle(3, color, 0.6);
+        btn.setStrokeStyle(Math.max(2, unit * 0.004), color, 0.6);
 
-        const labelText = scene.add.text(vX, vY, icon, { fontSize: Math.floor(radius / 1.2) + 'px', fontStyle: 'bold', fontFamily: 'Arial', color: '#ffffff' }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
+        const labelText = scene.add.text(vX, vY, icon, {
+            fontSize: Math.floor(radius * 0.8) + 'px',
+            fontStyle: 'bold',
+            fontFamily: 'Arial',
+            color: '#ffffff'
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         const press = () => {
             btn.fillAlpha = 0.7;
@@ -981,28 +994,28 @@ function createMobileControls(scene) {
         return btn;
     };
 
-    // Right Anchor (Bottom Right Corner)
-    const anchorX = width - 110;
-    const anchorY = height - 110;
+    // Anchor point: bottom-right with safe margin
+    const anchorX = width - safeMarginX - btnRadiusLg;
+    const anchorY = height - safeMarginY - btnRadiusLg;
 
-    // Punch (Main Attack, Largest Button, Centered)
-    createActionButton(anchorX, anchorY, 45, 0x00aaff, 'P', 'punch');
+    // Punch (Main Attack — largest, center of cluster)
+    createActionButton(anchorX, anchorY, btnRadiusLg, 0x00aaff, 'P', 'punch');
 
-    // Jump (Top)
-    createActionButton(anchorX, anchorY - 95, 35, 0xffffff, 'J', 'up');
+    // Jump (Top of cluster)
+    createActionButton(anchorX, anchorY - btnSpacing, btnRadiusMd, 0xffffff, 'J', 'up');
 
-    // Kick (Right)
-    createActionButton(anchorX + 85, anchorY - 30, 35, 0xff3333, 'K', 'kick');
+    // Kick (Right of cluster)
+    createActionButton(anchorX + btnSpacing * 0.85, anchorY - btnSpacing * 0.3, btnRadiusMd, 0xff3333, 'K', 'kick');
 
-    // Shield (Left)
-    createActionButton(anchorX - 95, anchorY + 15, 35, 0xffaa00, 'S', 'down');
+    // Shield (Left of cluster)
+    createActionButton(anchorX - btnSpacing * 0.85, anchorY + btnSpacing * 0.15, btnRadiusMd, 0xffaa00, 'S', 'down');
 
     // ==========================================
-    // 3. POWERS (Fanning outwards)
+    // 3. POWERS (Fanning outward from top of cluster)
     // ==========================================
-    createActionButton(anchorX - 30, anchorY - 150, 25, 0x00ffaa, 'Q', 'ball');
-    createActionButton(anchorX + 50, anchorY - 130, 25, 0x00ffaa, 'W', 'arrow');
-    createActionButton(anchorX + 100, anchorY - 95, 25, 0x00ffaa, 'E', 'spell');
+    createActionButton(anchorX - btnSpacing * 0.35, anchorY - btnSpacing * 1.7, btnRadiusSm, 0x00ffaa, 'Q', 'ball');
+    createActionButton(anchorX + btnSpacing * 0.45, anchorY - btnSpacing * 1.5, btnRadiusSm, 0x00ffaa, 'W', 'arrow');
+    createActionButton(anchorX + btnSpacing * 0.95, anchorY - btnSpacing * 1.1, btnRadiusSm, 0x00ffaa, 'E', 'spell');
 }
 
 // —————————————————————————————————————————————————————————————————————————————
