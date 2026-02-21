@@ -212,10 +212,11 @@ function create() {
     bg.setScale(bgScale);
     bg.setDepth(-10);
 
-    // Pick a random scene (0, 1, or 2) and offset Y so that scene fills the viewport
+    // Pick a random scene (0, 1, or 2), crop to just that slice, and position it
     const sceneIndex = Math.floor(Math.random() * 3);
-    const yOffset = -(sceneIndex * sceneHeight * bgScale) + 80;  // +80 shifts down so sprites stand on ground
-    bg.setY(yOffset);
+    const cropY = sceneIndex * sceneHeight;
+    bg.setCrop(0, cropY, bg.width, sceneHeight);      // clip to only this scene
+    bg.setY(-cropY * bgScale + 120);                  // +120 shifts down so sprites stand on ground
 
     // Invisible ground (physics only — background already has ground art)
     ground = this.add.rectangle(400, 570, 800, 40);
@@ -271,6 +272,10 @@ function create() {
     ui.cdW = document.getElementById('cd-w');
     ui.cdE = document.getElementById('cd-e');
     ui.cdContainer = document.getElementById('player-cooldowns');
+    ui.eCdQ = document.getElementById('ecd-q');
+    ui.eCdW = document.getElementById('ecd-w');
+    ui.eCdE = document.getElementById('ecd-e');
+    ui.eCdContainer = document.getElementById('enemy-cooldowns');
     ui.pElementLabel = document.getElementById('player-element-label');
     ui.eElementLabel = document.getElementById('enemy-element-label');
     ui.timer = document.getElementById('timer');
@@ -315,6 +320,7 @@ function create() {
         enemy.element = window.enemyElement.toLowerCase();
 
         ui.cdContainer.classList.remove('hidden');
+        ui.eCdContainer.classList.remove('hidden');
 
         resetGame(this);
         isGameActive = true;
@@ -838,8 +844,8 @@ function updateUI() {
     if (isGameActive && player.scene) {
         const time = player.scene.time.now;
 
-        const updateCd = (el, type) => {
-            if (time > player.cd[type]) {
+        const updateCd = (el, fighter, type) => {
+            if (time > fighter.cd[type]) {
                 el.classList.remove('cooldown');
                 el.classList.add('ready');
             } else {
@@ -847,9 +853,14 @@ function updateUI() {
                 el.classList.remove('ready');
             }
         };
-        updateCd(ui.cdQ, 'ball');
-        updateCd(ui.cdW, 'arrow');
-        updateCd(ui.cdE, 'spell');
+        // Player cooldowns
+        updateCd(ui.cdQ, player, 'ball');
+        updateCd(ui.cdW, player, 'arrow');
+        updateCd(ui.cdE, player, 'spell');
+        // Enemy cooldowns
+        updateCd(ui.eCdQ, enemy, 'ball');
+        updateCd(ui.eCdW, enemy, 'arrow');
+        updateCd(ui.eCdE, enemy, 'spell');
     }
 }
 
