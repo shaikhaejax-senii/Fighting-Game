@@ -588,6 +588,7 @@ function handlePlayerInput(time) {
         } else if (bufferedAction === 'jump' && onGround) {
             player.setVelocityY(STATS.jumpForce);
             player.setState(STATES.JUMP);
+            return;
         }
     }
 
@@ -875,10 +876,26 @@ function resetGame(scene) {
         fighter.isDead = false;
         fighter.setState(STATES.IDLE, true);
         fighter.clearTint();
+
+        // Clear stale timestamps from any previous match so cooldowns,
+        // run-transitions and AI thinking don't carry over.
+        fighter.cd.ball = 0;
+        fighter.cd.arrow = 0;
+        fighter.cd.spell = 0;
+        fighter.lastAttackTime = 0;
+        fighter.movingDirection = 0;
+        fighter.movingStartTime = 0;
+        fighter.nextThinkTime = 0;
+        fighter.aiState = null;
     });
 
     player.setPosition(200, 450);
     enemy.setPosition(600, 450);
+
+    // Reset match timer
+    gameTimer = 99;
+    lastTimerUpdate = scene.time.now;
+    if (ui.timer) ui.timer.textContent = gameTimer;
 
     updateUI();
 }
